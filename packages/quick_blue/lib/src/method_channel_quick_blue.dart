@@ -111,12 +111,13 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
   @override
   Future<void> setNotifiable(String deviceId, String service,
       String characteristic, BleInputProperty bleInputProperty) async {
-    _method.invokeMethod('setNotifiable', {
+    await _method.invokeMethod('setNotifiable', {
       'deviceId': deviceId,
       'service': service,
       'characteristic': characteristic,
       'bleInputProperty': bleInputProperty.value,
-    }).then((_) => _log('setNotifiable invokeMethod success'));
+    });
+    _log('setNotifiable invokeMethod success');
   }
 
   @override

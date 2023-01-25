@@ -44,6 +44,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
   private lateinit var messageConnector: BasicMessageChannel<Any>
   private val lock = ReentrantLock()
   private val writeCondition = lock.newCondition()
+  private val notificationCondition = lock.newCondition()
 
 
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -141,16 +142,27 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         result.success(null)
       }
       "setNotifiable" -> {
-        val deviceId = call.argument<String>("deviceId")!!
-        val service = call.argument<String>("service")!!
-        val characteristic = call.argument<String>("characteristic")!!
-        val bleInputProperty = call.argument<String>("bleInputProperty")!!
-        val gatt = knownGatts.find { it.device.address == deviceId }
-          ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
-        val c = gatt.getCharacteristic(service, characteristic)
-          ?: return result.error("IllegalArgument", "Unknown characteristic: $characteristic", null)
-        gatt.setNotifiable(c, bleInputProperty)
-        result.success(null)
+        lock.withLock<Unit> {
+          val deviceId = call.argument<String>("deviceId")!!
+          val service = call.argument<String>("service")!!
+          val characteristic = call.argument<String>("characteristic")!!
+          val bleInputProperty = call.argument<String>("bleInputProperty")!!
+          val gatt = knownGatts.find { it.device.address == deviceId }
+            ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+          val c = gatt.getCharacteristic(service, characteristic)
+            ?: return result.error(
+              "IllegalArgument",
+              "Unknown characteristic: $characteristic",
+              null
+            )
+          val setted = gatt.setNotifiable(c, bleInputProperty)
+          if (setted) {
+            notificationCondition.await()
+            result.success(null)
+          } else {
+            result.error("Characteristic unavailable", null, null);
+          }
+        }
       }
       "readValue" -> {
         val deviceId = call.argument<String>("deviceId")!!
@@ -384,6 +396,19 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         )
       )
     }
+
+    override fun onDescriptorWrite(
+      gatt: BluetoothGatt?,
+      descriptor: BluetoothGattDescriptor?,
+      status: Int
+    ) {
+      if (descriptor?.uuid == DESC__CLIENT_CHAR_CONFIGURATION) {
+        lock.withLock {
+          notificationCondition.signal()
+        }
+      }
+      super.onDescriptorWrite(gatt, descriptor, status)
+    }
   }
 }
 
@@ -410,7 +435,7 @@ private val DESC__CLIENT_CHAR_CONFIGURATION =
 fun BluetoothGatt.setNotifiable(
   gattCharacteristic: BluetoothGattCharacteristic,
   bleInputProperty: String
-) {
+): Boolean {
   if (gattCharacteristic.descriptors.none { it.uuid == DESC__CLIENT_CHAR_CONFIGURATION }) {
     gattCharacteristic.addDescriptor(
       BluetoothGattDescriptor(
@@ -430,5 +455,5 @@ fun BluetoothGatt.setNotifiable(
 
   descriptor.value = value
   writeDescriptor(descriptor)
-  setCharacteristicNotification(descriptor.characteristic, enable)
+  return setCharacteristicNotification(descriptor.characteristic, enable)
 }
