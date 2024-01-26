@@ -99,6 +99,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
       "isBluetoothAvailable" -> {
         result.success(bluetoothManager.adapter.isEnabled)
       }
+
       "startScan" -> {
         val advertisedServices = call.argument<List<String>?>("advertisedServices")
         bluetoothManager.adapter.bluetoothLeScanner?.startScan(advertisedServices?.map { it: String ->
@@ -108,10 +109,12 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         } ?: listOf(), ScanSettings.Builder().build(), scanCallback)
         result.success(null)
       }
+
       "stopScan" -> {
         bluetoothManager.adapter.bluetoothLeScanner?.stopScan(scanCallback)
         result.success(null)
       }
+
       "connect" -> {
         val deviceId = call.argument<String>("deviceId")!!
         if (knownGatts.find { it.device.address == deviceId } != null) {
@@ -127,6 +130,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         result.success(null)
         // TODO connecting
       }
+
       "disconnect" -> {
         val deviceId = call.argument<String>("deviceId")!!
         val gatt = knownGatts.find { it.device.address == deviceId }
@@ -136,6 +140,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         //FIXME If `disconnect` is called before BluetoothGatt.STATE_CONNECTED
         // there will be no `disconnected` message any more
       }
+
       "discoverServices" -> {
         val deviceId = call.argument<String>("deviceId")!!
         val gatt = knownGatts.find { it.device.address == deviceId }
@@ -143,6 +148,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         gatt.discoverServices()
         result.success(null)
       }
+
       "setNotifiable" -> {
         lock.withLock<Unit> {
           val deviceId = call.argument<String>("deviceId")!!
@@ -166,6 +172,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           }
         }
       }
+
       "readValue" -> {
         lock.withLock<Unit> {
           val deviceId = call.argument<String>("deviceId")!!
@@ -187,6 +194,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           }
         }
       }
+
       "writeValue" -> {
         lock.withLock<Unit> {
           val deviceId = call.argument<String>("deviceId")!!
@@ -207,6 +215,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           }
         }
       }
+
       "requestMtu" -> {
         lock.withLock<Unit> {
           val deviceId = call.argument<String>("deviceId")!!
@@ -218,6 +227,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           result.success(null)
         }
       }
+
       else -> {
         result.notImplemented()
       }
@@ -225,8 +235,9 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
   }
 
   private fun cleanConnection(gatt: BluetoothGatt) {
-    knownGatts.remove(gatt)
+    knownGatts.removeAll { it.device.address == gatt.device.address }
     gatt.disconnect()
+    gatt.close()
   }
 
   enum class AvailabilityState(val value: Int) {
@@ -289,6 +300,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         availabilityChangeSink = eventSink
         availabilityChangeSink?.success(bluetoothManager.getAvailabilityState().value)
       }
+
       "scanResult" -> scanResultSink = eventSink
     }
   }
