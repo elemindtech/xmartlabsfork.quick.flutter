@@ -87,6 +87,18 @@ public class QuickBlueDarwin: NSObject, FlutterPlugin {
         case "connect":
       let arguments = call.arguments as! Dictionary<String, Any>
       let deviceId = arguments["deviceId"] as! String
+
+      guard let deviceUUID = UUID(uuidString: deviceId) else {
+          result(FlutterError(code: "InvalidArgument", message: "deviceId is not a valid UUID string", details: nil))
+          return
+      }
+
+      // check for previous peripheral
+      let retrievedPeripherals = manager.retrievePeripherals(withIdentifiers: [deviceUUID])
+      if let retrievedPeripheral = retrievedPeripherals.first {
+          discoveredPeripherals[deviceId] = retrievedPeripheral
+      }
+
       guard let peripheral = discoveredPeripherals[deviceId] else {
         result(FlutterError(code: "IllegalArgument", message: "Unknown deviceId:\(deviceId)", details: nil))
         return
