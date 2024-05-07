@@ -42,6 +42,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
   private lateinit var eventAvailabilityChange: EventChannel
   private lateinit var eventScanResult: EventChannel
   private lateinit var messageConnector: BasicMessageChannel<Any>
+  private var connected = false
   private val lock = ReentrantLock()
   private val writeCondition = lock.newCondition()
   private val readCondition = lock.newCondition()
@@ -127,6 +128,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           remoteDevice.connectGatt(context, false, gattCallback)
         }
         knownGatts.add(gatt)
+        connected = true
         result.success(null)
         // TODO connecting
       }
@@ -166,7 +168,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           val setted = gatt.setNotifiable(c, bleInputProperty)
           if (setted) {
             notificationCondition.await()
-            result.success(null)
+            if (connected) result.success(null) else result.error("Device dissconected", null, null)
           } else {
             result.error("Characteristic unavailable", null, null);
           }
@@ -188,7 +190,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
             )
           if (gatt.readCharacteristic(c)) {
             readCondition.await()
-            result.success(null)
+            if (connected) result.success(null) else result.error("Device dissconected", null, null)
           } else {
             result.error("Characteristic unavailable", null, null)
           }
@@ -209,7 +211,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           }
           if (writeResult == true) {
             writeCondition.await()
-            result.success(null)
+            if (connected) result.success(null) else result.error("Device dissconected", null, null)
           } else {
             result.error("Characteristic unavailable", null, null)
           }
@@ -224,7 +226,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
             ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
           gatt.requestMtu(expectedMtu)
           mtuCondition.await()
-          result.success(null)
+          if (connected) result.success(null) else result.error("Device dissconected", null, null)
         }
       }
 
@@ -238,6 +240,13 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
     knownGatts.removeAll { it.device.address == gatt.device.address }
     gatt.disconnect()
     gatt.close()
+    connected = false
+    lock.withLock {
+      readCondition.signal()
+      writeCondition.signal()
+      notificationCondition.signal()
+      mtuCondition.signal()
+    }
   }
 
   enum class AvailabilityState(val value: Int) {
