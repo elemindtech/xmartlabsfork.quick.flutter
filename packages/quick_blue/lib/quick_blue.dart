@@ -8,60 +8,69 @@ export 'src/quick_blue_linux.dart';
 export 'src/quick_blue_platform_interface.dart';
 
 class QuickBlue {
-  static QuickBluePlatform _platform = QuickBluePlatform.instance;
+  // static QuickBluePlatform _platform = QuickBluePlatform.instance;
 
-  static set platform(QuickBluePlatform platform) {
-    _platform = platform;
-  }
+  // static set platform(QuickBluePlatform platform) {
+  //   _platform = platform;
+  // }
 
-  static void setInstance(QuickBluePlatform instance) => _platform = instance;
+  // static void setInstance(QuickBluePlatform instance) => _platform = instance;
 
-  static void setLogger(QuickLogger logger) => _platform.setLogger(logger);
+  static void setLogger(QuickLogger logger) => QuickBluePlatform.instance.setLogger(logger);
 
   static Future<bool> isBluetoothAvailable() =>
-      _platform.isBluetoothAvailable();
+      QuickBluePlatform.instance.isBluetoothAvailable();
 
   static Stream<AvailabilityState> get availabilityChangeStream =>
-      _platform.availabilityChangeStream.map(AvailabilityState.parse);
+      QuickBluePlatform.instance.availabilityChangeStream.map(AvailabilityState.parse);
 
   static Future<void> startScan([List<String>? advertisedServices]) =>
-      _platform.startScan(advertisedServices);
+      QuickBluePlatform.instance.startScan(advertisedServices);
 
-  static void stopScan() => _platform.stopScan();
+  static void stopScan() => QuickBluePlatform.instance.stopScan();
 
   static Stream<BlueScanResult> get scanResultStream {
-    return _platform.scanResultStream
+    return QuickBluePlatform.instance.scanResultStream
         .map((item) => BlueScanResult.fromMap(item));
   }
 
-  static void connect(String deviceId) => _platform.connect(deviceId);
+  static Future<void> connect(String deviceId) => QuickBluePlatform.instance.connect(deviceId);
 
-  static void disconnect(String deviceId) => _platform.disconnect(deviceId);
+  static Future<void> disconnect(String deviceId) async {
+    print('[disconnect] called');
+    try {
+      print('[disconnect] attempting platform disconnect');
+      await QuickBluePlatform.instance.disconnect(deviceId);
+      print('[disconnect] success');
+    } catch (e) {
+      rethrow;
+    }
+  }
 
   static void setConnectionHandler(OnConnectionChanged? onConnectionChanged) {
-    _platform.onConnectionChanged = onConnectionChanged;
+    QuickBluePlatform.instance.onConnectionChanged = onConnectionChanged;
   }
 
   static void discoverServices(String deviceId) =>
-      _platform.discoverServices(deviceId);
+      QuickBluePlatform.instance.discoverServices(deviceId);
 
   static void setServiceHandler(OnServiceDiscovered? onServiceDiscovered) {
-    _platform.onServiceDiscovered = onServiceDiscovered;
+    QuickBluePlatform.instance.onServiceDiscovered = onServiceDiscovered;
   }
 
   static Future<void> setNotifiable(String deviceId, String service,
       String characteristic, BleInputProperty bleInputProperty) {
-    return _platform.setNotifiable(
+    return QuickBluePlatform.instance.setNotifiable(
         deviceId, service, characteristic, bleInputProperty);
   }
 
   static void setValueHandler(OnValueChanged? onValueChanged) {
-    _platform.onValueChanged = onValueChanged;
+    QuickBluePlatform.instance.onValueChanged = onValueChanged;
   }
 
   static Future<void> readValue(
       String deviceId, String service, String characteristic) {
-    return _platform.readValue(deviceId, service, characteristic);
+    return QuickBluePlatform.instance.readValue(deviceId, service, characteristic);
   }
 
   static Future<void> writeValue(
@@ -70,10 +79,10 @@ class QuickBlue {
       String characteristic,
       Uint8List value,
       BleOutputProperty bleOutputProperty) {
-    return _platform.writeValue(
+    return QuickBluePlatform.instance.writeValue(
         deviceId, service, characteristic, value, bleOutputProperty);
   }
 
   static Future<int> requestMtu(String deviceId, int expectedMtu) =>
-      _platform.requestMtu(deviceId, expectedMtu);
+      QuickBluePlatform.instance.requestMtu(deviceId, expectedMtu);
 }

@@ -3,18 +3,21 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
-
+import 'package:mutex/mutex.dart';
 import 'quick_blue_platform_interface.dart';
 
 class MethodChannelQuickBlue extends QuickBluePlatform {
   static const _method = MethodChannel('quick_blue/method');
   static const _eventScanResult = EventChannel('quick_blue/event.scanResult');
+  late Mutex  _mutex;
+
   static const _eventAvailabilityChange =
       EventChannel('quick_blue/event.availabilityChange');
   static const _messageConnector = BasicMessageChannel(
       'quick_blue/message.connector', StandardMessageCodec());
 
   MethodChannelQuickBlue() {
+    _mutex = Mutex();
     _messageConnector.setMessageHandler(_handleConnectorMessage);
   }
 
@@ -30,10 +33,10 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
   }
 
   @override
-  Future<bool> isBluetoothAvailable() async {
+  Future<bool> isBluetoothAvailable() async =>_mutex.protect(() async {
     bool result = await _method.invokeMethod('isBluetoothAvailable');
     return result;
-  }
+  });
 
   final Stream<int> _availabilityChangeStream = _eventAvailabilityChange
       .receiveBroadcastStream({'name': 'availabilityChange'}).cast();
@@ -49,10 +52,10 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
   }
 
   @override
-  Future<void> stopScan() async {
+  Future<void> stopScan() async => _mutex.protect(() async {
     await _method.invokeMethod('stopScan');
     _log('stopScan invokeMethod success');
-  }
+  });
 
   final Stream<dynamic> _scanResultStream =
       _eventScanResult.receiveBroadcastStream({'name': 'scanResult'});
@@ -61,25 +64,33 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
   Stream<dynamic> get scanResultStream => _scanResultStream;
 
   @override
-  void connect(String deviceId) {
-    _method.invokeMethod('connect', {
+  Future<void> connect(String deviceId) async => _mutex.protect(() async {
+    await _method.invokeMethod('connect', {
       'deviceId': deviceId,
-    }).then((_) => _log('connect invokeMethod success'));
-  }
+    });
+    _log('connect invokeMethod success');
+  });
 
   @override
-  void disconnect(String deviceId) {
-    _method.invokeMethod('disconnect', {
-      'deviceId': deviceId,
-    }).then((_) => _log('disconnect invokeMethod success'));
-  }
+  Future<void> disconnect(String deviceId) async => _mutex.protect(() async { 
+    try {
+      await _method.invokeMethod('disconnect', {
+        'deviceId': deviceId,
+      });
+      print('[disconnect] method channel success');
+    } catch (e) {
+      print('[disconnect] method channel error catched');
+      rethrow;
+    }
+    _log('disconnect invokeMethod success');
+  });
 
   @override
-  void discoverServices(String deviceId) {
+  void discoverServices(String deviceId) => _mutex.protect(() async {
     _method.invokeMethod('discoverServices', {
       'deviceId': deviceId,
     }).then((_) => _log('discoverServices invokeMethod success'));
-  }
+  });
 
   Future<void> _handleConnectorMessage(dynamic message) async {
     _log('_handleConnectorMessage $message', logLevel: Level.ALL);
@@ -110,7 +121,7 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
 
   @override
   Future<void> setNotifiable(String deviceId, String service,
-      String characteristic, BleInputProperty bleInputProperty) async {
+      String characteristic, BleInputProperty bleInputProperty) async => _mutex.protect(() async {
     await _method.invokeMethod('setNotifiable', {
       'deviceId': deviceId,
       'service': service,
@@ -118,17 +129,17 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
       'bleInputProperty': bleInputProperty.value,
     });
     _log('setNotifiable invokeMethod success');
-  }
+  });
 
   @override
   Future<void> readValue(
-      String deviceId, String service, String characteristic) async {
+      String deviceId, String service, String characteristic) async => _mutex.protect(() async {
     _method.invokeMethod('readValue', {
       'deviceId': deviceId,
       'service': service,
       'characteristic': characteristic,
     }).then((_) => _log('readValue invokeMethod success'));
-  }
+  });
 
   @override
   Future<void> writeValue(
@@ -136,7 +147,7 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
       String service,
       String characteristic,
       Uint8List value,
-      BleOutputProperty bleOutputProperty) async {
+      BleOutputProperty bleOutputProperty) async => _mutex.protect(() async {
     await _method.invokeMethod('writeValue', {
       'deviceId': deviceId,
       'service': service,
@@ -145,17 +156,17 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
       'bleOutputProperty': bleOutputProperty.value,
     });
     _log('writeValue invokeMethod success', logLevel: Level.ALL);
-  }
+  });
 
   // FIXME Close
   final _mtuConfigController = StreamController<int>.broadcast();
 
   @override
-  Future<int> requestMtu(String deviceId, int expectedMtu) async {
+  Future<int> requestMtu(String deviceId, int expectedMtu) async => _mutex.protect(() async { 
     _method.invokeMethod('requestMtu', {
       'deviceId': deviceId,
       'expectedMtu': expectedMtu,
     }).then((_) => _log('requestMtu invokeMethod success'));
     return await _mtuConfigController.stream.first;
-  }
+  });
 }
