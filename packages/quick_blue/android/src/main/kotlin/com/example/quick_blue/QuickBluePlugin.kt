@@ -135,10 +135,13 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
 
       "disconnect" -> {
         val deviceId = call.argument<String>("deviceId")!!
-        val gatt = knownGatts.find { it.device.address == deviceId }
-          ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
-        cleanConnection(gatt)
-        result.success(null)
+        val gatt = knownGatts.find { it.device.address == deviceId } ?: null
+        if(gatt == null) {
+          result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+        } else {
+          cleanConnection(gatt)
+          result.success(null)
+        }
         //FIXME If `disconnect` is called before BluetoothGatt.STATE_CONNECTED
         // there will be no `disconnected` message any more
       }

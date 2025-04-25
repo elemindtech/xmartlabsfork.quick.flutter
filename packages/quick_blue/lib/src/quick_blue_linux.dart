@@ -124,14 +124,14 @@ class QuickBlueLinux extends QuickBluePlatform {
   }
 
   @override
-  void connect(String deviceId) {
+  Future<void> connect(String deviceId) async {
     _findDeviceById(deviceId).connect().then((_) {
       onConnectionChanged?.call(deviceId, BlueConnectionState.connected);
     });
   }
 
   @override
-  void disconnect(String deviceId) {
+  Future<void> disconnect(String deviceId) async {
     _findDeviceById(deviceId).disconnect().then((_) {
       onConnectionChanged?.call(deviceId, BlueConnectionState.disconnected);
     });

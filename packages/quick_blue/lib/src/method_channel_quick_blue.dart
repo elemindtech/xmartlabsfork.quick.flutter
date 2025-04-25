@@ -3,12 +3,12 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
-
 import 'quick_blue_platform_interface.dart';
 
 class MethodChannelQuickBlue extends QuickBluePlatform {
   static const _method = MethodChannel('quick_blue/method');
   static const _eventScanResult = EventChannel('quick_blue/event.scanResult');
+
   static const _eventAvailabilityChange =
       EventChannel('quick_blue/event.availabilityChange');
   static const _messageConnector = BasicMessageChannel(
@@ -61,17 +61,20 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
   Stream<dynamic> get scanResultStream => _scanResultStream;
 
   @override
-  void connect(String deviceId) {
-    _method.invokeMethod('connect', {
+  Future<void> connect(String deviceId) async {
+    await _method.invokeMethod('connect', {
       'deviceId': deviceId,
-    }).then((_) => _log('connect invokeMethod success'));
+    });
+    _log('connect invokeMethod success');
   }
 
   @override
-  void disconnect(String deviceId) {
-    _method.invokeMethod('disconnect', {
+  Future<void> disconnect(String deviceId) async {
+    await _method.invokeMethod('disconnect', {
       'deviceId': deviceId,
-    }).then((_) => _log('disconnect invokeMethod success'));
+    });
+
+    _log('disconnect invokeMethod success');
   }
 
   @override
