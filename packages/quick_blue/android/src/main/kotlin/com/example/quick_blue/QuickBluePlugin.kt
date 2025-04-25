@@ -47,7 +47,6 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
   private val writeCondition = lock.newCondition()
   private val readCondition = lock.newCondition()
   private val notificationCondition = lock.newCondition()
-  private val mtuCondition = lock.newCondition()
 
 
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -228,7 +227,6 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           val gatt = knownGatts.find { it.device.address == deviceId }
             ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
           gatt.requestMtu(expectedMtu)
-          mtuCondition.await()
           if (connected) result.success(null) else result.error("Device dissconected", null, null)
         }
       }
@@ -248,7 +246,6 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
       readCondition.signal()
       writeCondition.signal()
       notificationCondition.signal()
-      mtuCondition.signal()
     }
   }
 
@@ -372,16 +369,11 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
     }
 
     override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
-      if (status == BluetoothGatt.GATT_SUCCESS) {
         sendMessage(
           messageConnector, mapOf(
             "mtuConfig" to mtu
           )
         )
-        lock.withLock {
-          mtuCondition.signal()
-        }
-      }
     }
 
     override fun onCharacteristicRead(
