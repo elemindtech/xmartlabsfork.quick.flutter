@@ -48,8 +48,6 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
   private val writeCondition = lock.newCondition()
   private val readCondition = lock.newCondition()
   private val notificationCondition = lock.newCondition()
-  private val mtuCondition = lock.newCondition()
-
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
     method = MethodChannel(flutterPluginBinding.binaryMessenger, "quick_blue/method")
@@ -196,7 +194,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
             readCondition.await()
             if (connected) result.success(null) else result.error("Device disconnected", null, null)
           } else {
-            result.error("Characteristic unavailable", null, null)
+            result.error("Characteristic unavailable ${c.uuid}", null, null)
           }
         }
       }
@@ -210,9 +208,21 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           val gatt = knownGatts.find { it.device.address == deviceId }
             ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
           val writeResult = gatt.getCharacteristic(service, characteristic)?.let {
-            gatt.writeCharacteristic(it, value, it.writeType)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+              // Android 13+ (API 33+)
+              gatt.writeCharacteristic(it, value, it.writeType)
+            } else {
+              // Older Android versions
+              it.value = value
+              gatt.writeCharacteristic(it)
+            }
           }
-          if (writeResult == BluetoothGatt.GATT_SUCCESS) {
+          val writeResultCondition = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            writeResult == BluetoothGatt.GATT_SUCCESS
+          } else {
+            writeResult == true
+          }
+          if (writeResultCondition) {
             writeCondition.await()
             if (connected) result.success(null) else result.error("Device disconnected", null, null)
           } else {
@@ -228,7 +238,6 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           val gatt = knownGatts.find { it.device.address == deviceId }
             ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
           gatt.requestMtu(expectedMtu)
-          mtuCondition.await()
           if (connected) result.success(null) else result.error("Device disconnected", null, null)
         }
       }
@@ -248,7 +257,6 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
       readCondition.signal()
       writeCondition.signal()
       notificationCondition.signal()
-      mtuCondition.signal()
     }
   }
 
@@ -372,16 +380,36 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
     }
 
     override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
-      if (status == BluetoothGatt.GATT_SUCCESS) {
-        sendMessage(
-          messageConnector, mapOf(
-            "mtuConfig" to mtu
-          )
+      sendMessage(
+        messageConnector, mapOf(
+          "mtuConfig" to mtu
         )
-        lock.withLock {
-          mtuCondition.signal()
+      )
+    }
+
+    override fun onCharacteristicRead(
+      gatt: BluetoothGatt,
+      characteristic: BluetoothGattCharacteristic,
+      status: Int
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+          Log.v(
+            TAG,
+            "onCharacteristicRead ${characteristic.uuid}, ${characteristic.value.contentToString()}"
+          )
+          sendMessage(
+            messageConnector, mapOf(
+              "deviceId" to gatt.device.address,
+              "characteristicValue" to mapOf(
+                "characteristic" to characteristic.uuid.toString(),
+                "value" to characteristic.value
+              )
+            )
+          )
+          lock.withLock {
+            readCondition.signal()
+          }
         }
-      }
     }
 
     override fun onCharacteristicRead(
@@ -421,6 +449,28 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
       lock.withLock {
         writeCondition.signal()
       }
+    }
+
+    override fun onCharacteristicChanged(
+      gatt: BluetoothGatt,
+      characteristic: BluetoothGattCharacteristic
+    )
+    {
+        if(Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            Log.v(
+                TAG,
+                "onCharacteristicChanged ${characteristic.uuid}, ${characteristic.value.contentToString()}"
+            )
+            sendMessage(
+                messageConnector, mapOf(
+                    "deviceId" to gatt.device.address,
+                    "characteristicValue" to mapOf(
+                        "characteristic" to characteristic.uuid.toString(),
+                        "value" to characteristic.value
+                    )
+                )
+            )
+        }
     }
 
     override fun onCharacteristicChanged(
@@ -501,10 +551,21 @@ fun BluetoothGatt.setNotifiable(
   }
 
   try {
-    writeDescriptor(descriptor, value)
+    // Handle different API levels
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      // Android 13+ (API 33+)
+      writeDescriptor(descriptor, value)
+    } else {
+      // Older Android versions
+      descriptor.value = value
+      writeDescriptor(descriptor)
+    }
     return setCharacteristicNotification(descriptor.characteristic, enable)
   } catch (e: SecurityException) {
     Log.w("BLE", "Missing BLUETOOTH_CONNECT permission", e)
+    return false
+  } catch (e: Exception) {
+    Log.e("BLE", "Failed to set notification: ${e.message}", e)
     return false
   }
 }
