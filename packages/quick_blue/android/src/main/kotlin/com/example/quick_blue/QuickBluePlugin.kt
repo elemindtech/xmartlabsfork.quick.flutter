@@ -17,16 +17,16 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
-import androidx.annotation.NonNull
+import androidx.core.util.isEmpty
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.*
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
+import io.flutter.plugin.common.MethodChannel.Result
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.*
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
-import io.flutter.plugin.common.MethodChannel.Result
 
 
 private const val TAG = "QuickBluePlugin"
@@ -49,17 +49,25 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
   private val notificationCondition = lock.newCondition()
   private val mtuCondition = lock.newCondition()
 
-
-  override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    method = MethodChannel(flutterPluginBinding.binaryMessenger, "quick_blue/method")
+  override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+    val taskQueue = flutterPluginBinding.binaryMessenger.makeBackgroundTaskQueue()
+    method = MethodChannel(flutterPluginBinding.binaryMessenger, "quick_blue/method",
+      StandardMethodCodec.INSTANCE,
+      taskQueue
+    )
     eventAvailabilityChange =
-      EventChannel(flutterPluginBinding.binaryMessenger, "quick_blue/event.availabilityChange")
+      EventChannel(flutterPluginBinding.binaryMessenger, "quick_blue/event.availabilityChange",
+        StandardMethodCodec.INSTANCE,
+        taskQueue)
     eventScanResult =
-      EventChannel(flutterPluginBinding.binaryMessenger, "quick_blue/event.scanResult")
+      EventChannel(flutterPluginBinding.binaryMessenger, "quick_blue/event.scanResult",
+        StandardMethodCodec.INSTANCE,
+        taskQueue)
     messageConnector = BasicMessageChannel(
       flutterPluginBinding.binaryMessenger,
       "quick_blue/message.connector",
-      StandardMessageCodec.INSTANCE
+      StandardMessageCodec.INSTANCE,
+      taskQueue
     )
     method.setMethodCallHandler(this)
     eventAvailabilityChange.setStreamHandler(this)
@@ -76,7 +84,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
     )
   }
 
-  override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+  override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     bluetoothManager.adapter.bluetoothLeScanner?.stopScan(scanCallback)
 
     context.unregisterReceiver(broadcastReceiver)
@@ -95,10 +103,12 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
     mainThreadHandler.post { messageChannel.send(message) }
   }
 
-  override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
+  override fun onMethodCall(call: MethodCall, result: Result) {
     when (call.method) {
       "isBluetoothAvailable" -> {
-        result.success(bluetoothManager.adapter.isEnabled)
+        Handler(Looper.getMainLooper()).post {
+          result.success(bluetoothManager.adapter.isEnabled)
+        }
       }
 
       "startScan" -> {
@@ -108,18 +118,19 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
             ParcelUuid(UUID.fromString(it))
           ).build()
         } ?: listOf(), ScanSettings.Builder().build(), scanCallback)
-        result.success(null)
+        Handler(Looper.getMainLooper()).post { result.success(null)}
       }
 
       "stopScan" -> {
         bluetoothManager.adapter.bluetoothLeScanner?.stopScan(scanCallback)
-        result.success(null)
+        Handler(Looper.getMainLooper()).post {result.success(null)}
       }
 
       "connect" -> {
         val deviceId = call.argument<String>("deviceId")!!
         if (knownGatts.find { it.device.address == deviceId } != null) {
-          return result.success(null)
+          Handler(Looper.getMainLooper()).post { result.success(null)}
+          return
         }
         val remoteDevice = bluetoothManager.adapter.getRemoteDevice(deviceId)
         val gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -129,7 +140,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         }
         knownGatts.add(gatt)
         connected = true
-        result.success(null)
+        Handler(Looper.getMainLooper()).post {result.success(null)}
         // TODO connecting
       }
 
@@ -137,10 +148,10 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
         val deviceId = call.argument<String>("deviceId")!!
         val gatt = knownGatts.find { it.device.address == deviceId } ?: null
         if(gatt == null) {
-          result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+          Handler(Looper.getMainLooper()).post { result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)}
         } else {
           cleanConnection(gatt)
-          result.success(null)
+          Handler(Looper.getMainLooper()).post {result.success(null)}
         }
         //FIXME If `disconnect` is called before BluetoothGatt.STATE_CONNECTED
         // there will be no `disconnected` message any more
@@ -149,9 +160,14 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
       "discoverServices" -> {
         val deviceId = call.argument<String>("deviceId")!!
         val gatt = knownGatts.find { it.device.address == deviceId }
-          ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+        if (gatt == null) {
+          Handler(Looper.getMainLooper()).post {
+            result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+          }
+          return
+        }
         gatt.discoverServices()
-        result.success(null)
+        Handler(Looper.getMainLooper()).post {result.success(null)}
       }
 
       "setNotifiable" -> {
@@ -161,19 +177,29 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           val characteristic = call.argument<String>("characteristic")!!
           val bleInputProperty = call.argument<String>("bleInputProperty")!!
           val gatt = knownGatts.find { it.device.address == deviceId }
-            ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+          if (gatt == null) {
+            Handler(Looper.getMainLooper()).post {
+              result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+            }
+            return
+          }
           val c = gatt.getCharacteristic(service, characteristic)
-            ?: return result.error(
-              "IllegalArgument",
-              "Unknown characteristic: $characteristic",
-              null
-            )
+          if (c == null) {
+            Handler(Looper.getMainLooper()).post {
+              result.error(
+                "IllegalArgument",
+                "Unknown characteristic: $characteristic",
+                null
+              )
+            }
+            return
+          }
           val setted = gatt.setNotifiable(c, bleInputProperty)
           if (setted) {
             notificationCondition.await()
-            if (connected) result.success(null) else result.error("Device dissconected", null, null)
+            if (connected) Handler(Looper.getMainLooper()).post {result.success(null)} else Handler(Looper.getMainLooper()).post { result.error("Device disconnected", null, null)}
           } else {
-            result.error("Characteristic unavailable", null, null);
+            Handler(Looper.getMainLooper()).post {result.error("Characteristic unavailable", null, null);}
           }
         }
       }
@@ -184,18 +210,28 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           val service = call.argument<String>("service")!!
           val characteristic = call.argument<String>("characteristic")!!
           val gatt = knownGatts.find { it.device.address == deviceId }
-            ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+          if (gatt == null) {
+            Handler(Looper.getMainLooper()).post {
+              result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+            }
+            return
+          }
           val c = gatt.getCharacteristic(service, characteristic)
-            ?: return result.error(
-              "IllegalArgument",
-              "Unknown characteristic: $characteristic",
-              null
-            )
+          if (c == null) {
+            Handler(Looper.getMainLooper()).post {
+              result.error(
+                "IllegalArgument",
+                "Unknown characteristic: $characteristic",
+                null
+              )
+            }
+            return
+          }
           if (gatt.readCharacteristic(c)) {
             readCondition.await()
-            if (connected) result.success(null) else result.error("Device dissconected", null, null)
+            if (connected) Handler(Looper.getMainLooper()).post {result.success(null)} else Handler(Looper.getMainLooper()).post {result.error("Device disconnected", null, null)}
           } else {
-            result.error("Characteristic unavailable", null, null)
+            Handler(Looper.getMainLooper()).post { result.error("Characteristic unavailable ${c.uuid}", null, null)}
           }
         }
       }
@@ -207,16 +243,21 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           val characteristic = call.argument<String>("characteristic")!!
           val value = call.argument<ByteArray>("value")!!
           val gatt = knownGatts.find { it.device.address == deviceId }
-            ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+          if (gatt == null) {
+            Handler(Looper.getMainLooper()).post {
+              result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+            }
+            return
+          }
           val writeResult = gatt.getCharacteristic(service, characteristic)?.let {
             it.value = value
             gatt.writeCharacteristic(it)
           }
           if (writeResult == true) {
             writeCondition.await()
-            if (connected) result.success(null) else result.error("Device dissconected", null, null)
+            if (connected) Handler(Looper.getMainLooper()).post { result.success(null)} else Handler(Looper.getMainLooper()).post { result.error("Device disconnected", null, null)}
           } else {
-            result.error("Characteristic unavailable", null, null)
+            Handler(Looper.getMainLooper()).post {result.error("Characteristic unavailable", null, null)}
           }
         }
       }
@@ -226,10 +267,14 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
           val deviceId = call.argument<String>("deviceId")!!
           val expectedMtu = call.argument<Int>("expectedMtu")!!
           val gatt = knownGatts.find { it.device.address == deviceId }
-            ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+          if (gatt == null) {
+            Handler(Looper.getMainLooper()).post {
+              result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
+            }
+            return
+          }
           gatt.requestMtu(expectedMtu)
-          mtuCondition.await()
-          if (connected) result.success(null) else result.error("Device dissconected", null, null)
+          if (connected) Handler(Looper.getMainLooper()).post {result.success(null)} else Handler(Looper.getMainLooper()).post { result.error("Device disconnected", null, null)}
         }
       }
 
@@ -275,7 +320,7 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
   private val broadcastReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
       if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
-        availabilityChangeSink?.success(bluetoothManager.getAvailabilityState().value)
+        Handler(Looper.getMainLooper()).post {availabilityChangeSink?.success(bluetoothManager.getAvailabilityState().value)}
       }
     }
   }
@@ -287,14 +332,15 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
 
     override fun onScanResult(callbackType: Int, result: ScanResult) {
       Log.v(TAG, "onScanResult: $callbackType + $result")
-      scanResultSink?.success(
+      Handler(Looper.getMainLooper()).post {
+        scanResultSink?.success(
         mapOf<String, Any>(
           "name" to (result.device.name ?: ""),
           "deviceId" to result.device.address,
           "manufacturerDataHead" to (result.manufacturerDataHead ?: byteArrayOf()),
           "rssi" to result.rssi
         )
-      )
+      )}
     }
 
     override fun onBatchScanResults(results: MutableList<ScanResult>?) {
@@ -310,8 +356,9 @@ class QuickBluePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHan
     when (map["name"]) {
       "availabilityChange" -> {
         availabilityChangeSink = eventSink
-        availabilityChangeSink?.success(bluetoothManager.getAvailabilityState().value)
-      }
+        Handler(Looper.getMainLooper()).post {
+          availabilityChangeSink?.success(bluetoothManager.getAvailabilityState().value)
+        }      }
 
       "scanResult" -> scanResultSink = eventSink
     }
