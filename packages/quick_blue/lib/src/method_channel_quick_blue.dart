@@ -126,7 +126,7 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
   @override
   Future<void> readValue(
       String deviceId, String service, String characteristic) async {
-    _method.invokeMethod('readValue', {
+    await _method.invokeMethod('readValue', {
       'deviceId': deviceId,
       'service': service,
       'characteristic': characteristic,
