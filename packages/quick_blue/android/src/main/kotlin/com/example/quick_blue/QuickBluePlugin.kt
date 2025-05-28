@@ -27,11 +27,6 @@ import java.nio.ByteOrder
 import java.util.*
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
-import androidx.core.util.isEmpty
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 
 private const val TAG = "QuickBluePlugin"
